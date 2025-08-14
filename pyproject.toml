@@ -1,7 +1,7 @@
 [project]
 name = "security-utils"
 version = "0.1.2"
-description = "A collection of functions that are helpful for maintaining proper confidentiality."
+description = "A simple Python package providing utilities for environment management."
 readme = "README.md"
 authors = [
     { name = "ktrin-u" }
