@@ -1,38 +1,30 @@
 """
 Logging utilities for the security_utils package.
 
-This module provides functions to configure and retrieve loggers with appropriate handlers and log levels
-based on the environment. It supports both console and file logging with rotation.
+This module provides a function to configure and retrieve loggers with appropriate handlers and log levels
+based on the project environment. It supports both console and file logging with rotation, and allows
+customization of the log level.
+
+Functions
+---------
+setup :
+    Set up logging for a given identifier and logger target, with support for console and file handlers.
 """
 
 import logging
 import logging.handlers
 import os
+from typing import Optional
 
 
-def get_log_level() -> int:
-    """
-    Get the logging level based on the ENVIRONMENT environment variable.
-
-    Returns
-    -------
-    int
-        The logging level (e.g., logging.DEBUG or logging.INFO).
-    """
-    ENVIRONMENT = os.getenv("ENVIRONMENT", "prod")
-    return (
-        logging.DEBUG
-        if ENVIRONMENT not in ["prod", "production"]
-        else logging.INFO
-    )
-
-
-def setup(identifier: str, logger_target: str) -> None:
+def setup(
+    identifier: str, logger_target: str, log_level: Optional[int] = None
+) -> None:
     """
     Set up logging for a given identifier and logger target.
 
     Configures both console and file handlers (with daily rotation) for the logger.
-    The log level is determined by the environment.
+    The log level is determined by the environment or can be set explicitly.
 
     Parameters
     ----------
@@ -40,12 +32,30 @@ def setup(identifier: str, logger_target: str) -> None:
         Identifier to include in log messages (e.g., the service or module name).
     logger_target : str
         Name of the logger to configure.
+    log_level : int, optional
+        Logging level to use (e.g., logging.DEBUG, logging.INFO). If not provided, the level is
+        determined by the project environment ("prod"/"production" = INFO, otherwise DEBUG).
 
     Returns
     -------
     None
+
+    Examples
+    --------
+    >>> from security_utils.logging import setup
+    >>> setup("MyService", __name__)
     """
-    LOG_LEVEL = get_log_level()
+    from security_utils.environment import get_project_environment
+
+    if isinstance(log_level, int):
+        LOG_LEVEL = log_level
+    else:
+        ENVIRONMENT = get_project_environment()
+        LOG_LEVEL = (
+            logging.DEBUG
+            if ENVIRONMENT not in ["prod", "production"]
+            else logging.INFO
+        )
     LOG_FORMAT = logging.Formatter(
         f"[%(asctime)s][{identifier}][%(levelname)s][%(name)s]: %(message)s"
     )
