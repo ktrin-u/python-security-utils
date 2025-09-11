@@ -1,5 +1,22 @@
 """
-This module contains utility functions related to secrets, keys and permission files
+Utility functions for environment centric matters
+
+Overview
+--------
+The functions in this module are designed to simplify the management of environment variables and
+project configuration for security-sensitive Python applications. It includes logic for recursively
+locating the project root, loading secrets from .env files, and enforcing the presence of required environment variables.
+
+Dependencies
+------------
+- dotenv: For loading environment variables from .env files.
+- security_utils.exceptions: For custom exception handling.
+
+Examples
+--------
+>>> from security_utils.environment import get_required_env_var
+>>> api_key = get_required_env_var('API_KEY')
+
 """
 
 import logging
@@ -10,7 +27,10 @@ from typing import Optional
 from dotenv import load_dotenv
 from dotenv.main import StrPath
 
-from security_utils.exceptions import MissingRequiredEnvironmentVariable
+from security_utils.exceptions import (
+    MissingProjectEnvironmentVariable,
+    MissingRequiredEnvironmentVariable,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +39,15 @@ def get_project_root() -> Path:
     """
     Recursively finds the project root directory by searching for known root files.
 
-    :return: Path to the project root directory
-    :rtype: Path
-    :raises StopIteration: If the project root cannot be found
+    Returns
+    -------
+    Path
+        Path to the project root directory.
+
+    Raises
+    ------
+    StopIteration
+        If the project root cannot be found.
     """
     ROOT_FILES = ["pyproject.toml"]
 
@@ -54,10 +80,19 @@ def load_env_secrets(secrets_path: StrPath = Path(".secrets")) -> None:
     """
     Loads environment variables from all .env files in the specified secrets directory.
 
-    :param secrets_path: Path to the secrets directory (default: .secrets)
-    :type secrets_path: StrPath
-    :return: True if any .env files were loaded, False otherwise
-    :rtype: bool
+    Parameters
+    ----------
+    secrets_path : StrPath, optional
+        Path to the secrets directory (default is ".secrets").
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    Exception
+        If the secrets directory does not exist and not running in Docker.
     """
     secrets_folder = get_project_root().joinpath(secrets_path).resolve()
 
@@ -74,20 +109,65 @@ def load_env_secrets(secrets_path: StrPath = Path(".secrets")) -> None:
     if os.getenv("ISDOCKER", None):
         return
 
-    raise Exception(f"Failed to load environment secrets: {secrets_folder} does not exist")
+    raise Exception(
+        f"Failed to load environment secrets: {secrets_folder} does not exist"
+    )
 
 
 def get_required_env_var(variable_name: str) -> str:
     """
     Gets a required environment variable, raising an exception if it is not found.
 
-    :param variable_name: Name of the environment variable
-    :type variable_name: str
-    :return: Value of the environment variable
-    :rtype: str
-    :raises MissingRequiredEnvironmentVariable: If the variable is not found
+    Parameters
+    ----------
+    variable_name : str
+        Name of the environment variable.
+
+    Returns
+    -------
+    str
+        Value of the environment variable.
+
+    Raises
+    ------
+    MissingRequiredEnvironmentVariable
+        If the variable is not found.
     """
     try:
         return os.environ[variable_name.upper()]
     except KeyError:
         raise MissingRequiredEnvironmentVariable(variable_name)
+
+
+def get_project_environment(aliases: Optional[list[str]] = None) -> str:
+    """
+    Gets the project environment from a list of possible environment variable aliases.
+
+    Parameters
+    ----------
+    aliases : list of str, optional
+        List of environment variable names to check (default is ["PROJECT_ENVIRONMENT", "ENVIRONMENT"]).
+
+    Returns
+    -------
+    str
+        Value of the first found environment variable.
+
+    Raises
+    ------
+    TypeError
+        If aliases is not a list of strings.
+    MissingProjectEnvironmentVariable
+        If none of the aliases are found in the environment.
+    """
+    if aliases is None:
+        aliases = ["PROJECT_ENVIRONMENT", "ENVIRONMENT"]
+    if not isinstance(aliases, list):
+        raise TypeError(f"aliases must be a list, got {type(aliases)}")
+    if not any(isinstance(alias, str) for alias in aliases):
+        raise TypeError("aliases must be a list[str]")
+    for alias in aliases:
+        environment = os.getenv(alias.upper(), None)
+        if isinstance(environment, str):
+            return environment
+    raise MissingProjectEnvironmentVariable(aliases)
