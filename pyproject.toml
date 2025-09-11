@@ -1,6 +1,5 @@
 [project]
 name = "security-utils"
-version = "0.2.0"
 description = "A simple Python package providing utilities for environment management."
 readme = "README.md"
 authors = [
@@ -10,7 +9,146 @@ requires-python = ">=3.12"
 dependencies = [
     "python-dotenv>=1.1.1",
 ]
+dynamic = ["version"]
+
+
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
+fallback-version = "0.0.0"
+
+[tool.hatch.build.targets.wheel]
+packages = ["security_utils"]
+
+# MARK: Ruff
+# Formatter and linter settings
+[tool.ruff]
+line-length = 80
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+    "migrations",
+]
+
+[tool.ruff.lint]
+# The following rules to improve code readability
+select = [
+    # pycodestyle, https://docs.astral.sh/ruff/rules/#error-e
+    "E",
+    "W",
+    # Pyflakes, https://docs.astral.sh/ruff/rules/#warning-w
+    "F",
+    # flake8-simplify, https://docs.astral.sh/ruff/rules/#flake8-simplify-sim
+    "SIM",
+    # flake8-return, https://docs.astral.sh/ruff/rules/#flake8-return-ret
+    "RET",
+    # flake8-bugbear, https://docs.astral.sh/ruff/rules/#flake8-bugbear-b
+    "B",
+    # isort, https://docs.astral.sh/ruff/rules/#isort-i
+    "I",
+    # pyupgrade, https://docs.astral.sh/ruff/rules/#pyupgrade-up
+    "UP",
+]
+# Consult https://docs.astral.sh/ruff/rules/ for specifics
+ignore = [
+    "E501",  # line too long (over 100 chars)
+    "B904",  # raise exception outside except block
+    "E402",  # module import not at top of file
+    "SIM105",  # use contextlib.suppress instead of try/except/pass
+    "SIM118",  # use set comprehension instead of set(list comprehension)
+    "UP015",  # redundant open() mode
+    "SIM211",  # use dict comprehension instead of dict(list comprehension)
+    "RET504",  # unnecessary variable assignment before return
+    "UP008",  # super() with explicit arguments
+    "UP012",  # unnecessary type annotation for variable
+    "B017",  # assertRaises(Exception) is too broad
+    "UP007",  # unnecessary list comprehension
+    "UP038",  # use explicit type alias
+    "UP045",  # unnecessary lambda expression
+]
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["F401", "W293", "SIM108", "I001", "F541", "UP034", "W292"]
+unfixable = ["B", "SIM", "F841", "UP031"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["ALL"]  # unused imports are expected within __init.py
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# MARK: Pytest
+# Pytest configuration
+[tool.pytest.ini_options]
+addopts = "--cov-append --create-db -p no:warnings --durations=10"
+testpaths = [
+    "tests"
+]
+norecursedirs = [
+    "**/__pycache__",
+]
+python_files = "test_*.py"
+filterwarnings = ["ignore::DeprecationWarnings"]
+
+
+# MARK: Coverage
+# Coverage configuration
+[tool.coverage.run]
+branch = true
+parallel = true
+omit =[
+    "**/__init__.py",
+    "**/migrations/*",
+    "**/*.pyc",
+    "**/.venv/",
+    "**/tests/**",
+    "config.py",
+    "config-3.py",
+    "manage.py",
+    "**/asgi.py",
+    "**/wsgi.py",
+    # "utils/*",
+]
+
+[tool.coverage.html]
+directory = ".coverage_reports/html/"
+
