@@ -50,12 +50,15 @@ def setup(
     if isinstance(log_level, int):
         LOG_LEVEL = log_level
     else:
-        ENVIRONMENT = get_project_environment()
-        LOG_LEVEL = (
-            logging.DEBUG
-            if ENVIRONMENT not in ["prod", "production"]
-            else logging.INFO
-        )
+        try:
+            ENVIRONMENT = get_project_environment()
+            LOG_LEVEL = (
+                logging.DEBUG
+                if ENVIRONMENT not in ["prod", "production"]
+                else logging.INFO
+            )
+        except:  # noqa: E722
+            LOG_LEVEL = logging.CRITICAL
     LOG_FORMAT = logging.Formatter(
         f"[%(asctime)s][{identifier}][%(levelname)s][%(name)s]: %(message)s"
     )
