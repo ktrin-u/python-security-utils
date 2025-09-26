@@ -16,9 +16,9 @@ security_utils.logging : Logging setup utilities
 security_utils.exceptions : Custom exception classes
 """
 
-from security_utils.logging import setup
+from security_utils.logging import LoggerManager
 
-setup("Security Utils", __package__ or __name__)
+LoggerManager.setup("Security Utils", __package__ or __name__)
 
 from security_utils.environment import (
     get_project_root,
