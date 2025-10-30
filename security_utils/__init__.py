@@ -25,11 +25,12 @@ from security_utils.environment import (
     get_required_env_var,
     load_env_secrets,
     get_project_environment,
-)  # noqa: F401
+)
 
 __all__ = [
     "get_project_root",
     "get_required_env_var",
     "load_env_secrets",
     "get_project_environment",
+    "LoggerManager",
 ]

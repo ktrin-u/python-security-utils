@@ -19,8 +19,6 @@ import warnings
 from collections.abc import Iterable
 from typing import Optional
 
-from security_utils.environment import get_project_environment
-
 _Level = int | str
 
 
@@ -50,15 +48,11 @@ class LoggerManager:
             cls._LOG_LEVEL, (str, int)
         ):
             return cls._LOG_LEVEL
-        try:
-            ENVIRONMENT = get_project_environment()
-            cls._LOG_LEVEL = (
-                logging.DEBUG
-                if ENVIRONMENT not in ["prod", "production"]
-                else logging.INFO
-            )
-        except:  # noqa: E722
-            cls._LOG_LEVEL = logging.CRITICAL
+        DEBUG_MODE = os.getenv("DEBUG_MODE", False)
+        if DEBUG_MODE:
+            cls._LOG_LEVEL = logging.DEBUG
+        else:
+            cls._LOG_LEVEL = logging.INFO
 
         return cls._LOG_LEVEL
 
