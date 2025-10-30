@@ -20,9 +20,13 @@ Examples
 """
 
 import logging
+import inspect
+
+import warnings
+import sys
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from dotenv import load_dotenv
 from dotenv.main import StrPath
@@ -35,7 +39,23 @@ from security_utils.exceptions import (
 logger = logging.getLogger(__name__)
 
 
-def get_project_root() -> Path:
+def check_if_venv() -> bool:
+    venv = os.getenv("VIRTUAL_ENV")
+    if venv:
+        return True
+
+    conda = os.getenv("CONDA_PREFIX")
+    if conda:
+        return True
+
+    # older virtualenv
+    if hasattr(sys, "real_prefix"):
+        return True
+
+    # venv / modern virtualenv: sys.base_prefix is original interpreter roo
+    return getattr(sys, "base_prefix", sys.prefix) != sys.prefix
+
+def get_project_root(caller_file: os.PathLike | None = None, root_file_indicators: Iterable[str]=[], ) -> Path:
     """
     Recursively finds the project root directory by searching for known root files.
 
@@ -49,7 +69,30 @@ def get_project_root() -> Path:
     StopIteration
         If the project root cannot be found.
     """
-    ROOT_FILES = ["pyproject.toml"]
+    if not check_if_venv():
+        raise OSError((
+                "Detected that the process is not in a virtual environment. get_project_root may cause issues.",
+                "Suggestion: define PROJECT_ROOT in environment."
+            )
+        )
+
+    PROJECT_ROOT = os.getenv("PROJECT_ROOT")
+
+    if PROJECT_ROOT is not None:
+        try:
+            return Path(PROJECT_ROOT).absolute()
+        except Exception as e:
+            raise e
+
+    ROOT_FILES = (
+        [
+            "pyproject.toml",
+            "setup.cfg",
+            "setup.py",
+            "uv.lock",
+            "poetry.lock",
+        ]
+    )
 
     def recurse(cwd: Path, prev: Optional[Path] = None) -> Path:
         if cwd == prev:
@@ -57,14 +100,7 @@ def get_project_root() -> Path:
 
         for file in os.listdir(cwd):
             if file in ROOT_FILES:
-                pyproject_path = cwd.joinpath("pyproject.toml")
-                try:
-                    with open(pyproject_path, "r", encoding="utf-8") as f:
-                        first_line = f.readline().strip()
-                        if first_line == "[project]":
-                            return cwd.resolve()
-                except:  # noqa: E722
-                    ...
+                return cwd
 
         next = cwd.parent
 
@@ -73,8 +109,10 @@ def get_project_root() -> Path:
 
         return recurse(cwd.parent, cwd)
 
-    return recurse(Path(__file__).parent)
+    if caller_file is not None:
+        return recurse(Path(os.path.dirname(caller_file)))
 
+    return recurse(Path(__file__).parent)
 
 def load_env_secrets(secrets_path: StrPath = Path(".secrets")) -> None:
     """
