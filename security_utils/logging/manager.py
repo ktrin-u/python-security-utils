@@ -1,14 +1,20 @@
-"""
-Logging utilities for the security_utils package.
+"""security_utils.logging.manager
+================================
 
-This module provides a function to configure and retrieve loggers with appropriate handlers and log levels
-based on the project environment. It supports both console and file logging with rotation, and allows
-customization of the log level.
+Utilities to configure module/package loggers consistently across the
+project.
+
+This module exposes :class:`LoggerManager`, a convenience manager for
+creating and configuring a named :class:`logging.Logger` with
+console and rotating file handlers. It centralizes log formatting,
+log directory selection and default log level decisions so packages can
+use a single, predictable logging configuration.
 
 Functions
 ---------
-setup :
-    Set up logging for a given identifier and logger target, with support for console and file handlers.
+setup
+    Convenience wrapper (via :class:`LoggerManager.setup`) to configure a
+    logger for a given identifier and target.
 """
 
 import inspect
@@ -19,15 +25,31 @@ import warnings
 from collections.abc import Iterable
 from typing import Optional
 
+from .formatter import ExpandedFormatter
+
 _Level = int | str
 
 
 class LoggerManager:
     """
-    LoggerManager provides classmethods to configure and retrieve loggers with appropriate handlers and log levels.
+    Manager for configuring package loggers with sensible defaults.
 
-    This class is designed for quick, top-level logger setup in other packages, especially in their __init__.py.
-    It supports both console and file logging with rotation, and allows customization of the log level and log directory.
+    The class exposes classmethods that configure a logger's level,
+    attach handlers (console and timed rotating file handler), and set a
+    structured formatter. Intended for lightweight, top-level use (for
+    example, in a package ``__init__``) to ensure consistent logging
+    behavior across consumers of the package.
+
+    Attributes
+    ----------
+    _IDENTIFIER : str
+        Service or package identifier inserted into formatted log records.
+    _LOGS_PATH : str | os.PathLike
+        Optional base directory in which log subdirectory ``_logs`` is
+        created for file handlers.
+    _LOG_LEVEL : int | str
+        Optional override for the logger level. When not provided, the
+        manager inspects the environment to choose a default level.
     """
 
     _IDENTIFIER: str
@@ -37,12 +59,20 @@ class LoggerManager:
     @classmethod
     def LOG_LEVEL(cls) -> _Level:
         """
-        Get the current log level for the logger.
+        Determine the effective log level for loggers configured by the
+        manager.
+
+        The method returns an explicitly configured ``_LOG_LEVEL`` when
+        present on the class. Otherwise it inspects the environment
+        variable ``DEBUG_MODE`` to decide between ``logging.DEBUG`` and
+        ``logging.INFO``.
 
         Returns
         -------
-        _Level
-            The logging level (e.g., logging.DEBUG, logging.INFO).
+        int | str
+            The logging level value suitable for ``logger.setLevel``. This
+            may be an integer (e.g. ``logging.DEBUG``) or a string name of
+            the level.
         """
         if hasattr(cls, "_LOG_LEVEL") and isinstance(
             cls._LOG_LEVEL, (str, int)
@@ -59,24 +89,28 @@ class LoggerManager:
     @classmethod
     def LOG_FORMAT(cls) -> logging.Formatter:
         """
-        Get the log message format for the logger.
+        Return a configured :class:`logging.Formatter` for this manager.
+
+        The formatter uses the manager's ``_IDENTIFIER`` to inject a
+        service/package identifier into each formatted record. A
+        :class:`AttributeError` is raised when ``_IDENTIFIER`` is not set
+        correctly on the class.
 
         Returns
         -------
         logging.Formatter
-            Formatter for log messages including timestamp, identifier, level, and logger name.
+            Formatter instance used by handlers managed by
+            :class:`LoggerManager`.
 
         Raises
         ------
         AttributeError
-            If _IDENTIFIER is not set on the class.
+            When ``_IDENTIFIER`` is not defined or is not a string.
         """
         if hasattr(cls, "_IDENTIFIER") and isinstance(
             getattr(cls, "_IDENTIFIER", None), str
         ):
-            return logging.Formatter(
-                f"[%(asctime)s][{cls._IDENTIFIER}][%(levelname)s][%(name)s]: %(message)s"
-            )
+            return ExpandedFormatter(cls._IDENTIFIER)
         raise AttributeError(
             f"{cls.__name__} has no attribute _IDENTIFIER or it is not a string"
         )
@@ -84,17 +118,26 @@ class LoggerManager:
     @classmethod
     def LOG_DIRECTORY(cls) -> str:
         """
-        Get the directory where log files will be stored.
+        Determine the directory used to store rotating log files.
+
+        The method prefers an explicit ``_LOGS_PATH`` when provided. If
+        absent it attempts to infer a package-local ``_logs`` directory by
+        walking the call stack and locating the first ``__init__.py`` of
+        the caller. If no suitable caller package can be found the method
+        falls back to a top-level ``_logs`` directory adjacent to this
+        module and emits a :class:`warnings.WarningMessage`.
 
         Returns
         -------
         str
-            Path to the log directory.
+            Absolute path to the directory where log files should be
+            created. The directory itself may not exist yet.
 
         Notes
         -----
-        If LOGS_PATH is not set, attempts to infer the directory from the caller's package (__init__.py).
-        If that fails, defaults to the directory of this file and issues a warning.
+        The returned path will be used by the timed rotating file handler
+        to write ``logs.log`` and the caller is responsible for ensuring
+        appropriate filesystem permissions.
         """
         # Setup the Log File Directory
         if not isinstance(
@@ -133,31 +176,42 @@ class LoggerManager:
         handlers: Optional[Iterable[logging.Handler]] = None,
     ) -> None:
         """
-        Set up logging for a given identifier and logger target.
+        Configure and attach handlers to a named logger.
 
-        Configures both console and file handlers (with daily rotation) for the logger.
-        The log level is determined by the environment or can be set explicitly.
-        The log file directory can be customized or inferred from the caller's package.
+        The method creates or reconfigures the logger named by
+        ``logger_target`` and attaches handlers according to the provided
+        flags. By default both a console handler and a timed rotating
+        file handler (daily rotation) are added. The function also logs
+        the chosen log level and log directory using the newly
+        configured logger.
 
         Parameters
         ----------
         identifier : str
-            Identifier to include in log messages (e.g., the service or module name).
+            Short identifier (service or package name) injected into log
+            messages via the formatter.
         logger_target : str
-            Name of the logger to configure (typically __name__ or __package__).
-        log_level : int, optional
-            Logging level to use (e.g., logging.DEBUG, logging.INFO). If not provided, the level is
-            determined by the project environment ("prod"/"production" = INFO, otherwise DEBUG).
-        logger_files_path : str or os.PathLike, optional
-            Directory in which to store log files. If not provided, attempts to infer from the caller's package.
+            Logger name to configure (commonly ``__name__`` or
+            ``__package__``).
+        log_level : int | str, optional
+            Explicit log level to use for the logger and handlers. If
+            omitted the manager falls back to :meth:`LOG_LEVEL`.
+        logger_files_path : str | os.PathLike, optional
+            Base path where a subordinate ``_logs`` directory will be
+            created to store rotating log files. When omitted the
+            directory is inferred from the caller package.
         propagate : bool, optional
-            Whether log messages are passed to ancestor loggers. Default is True.
+            Whether messages handled by this logger are passed to
+            ancestor loggers. Defaults to ``True``.
         console_handler : bool, optional
-            Whether to add a console handler. Default is True.
+            Add a console (stream) handler when ``True``. Default ``True``.
         rotating_file_handler : bool, optional
-            Whether to add a rotating file handler. Default is True.
+            Add a timed rotating file handler when ``True``. Default
+            ``True``.
         handlers : Iterable[logging.Handler], optional
-            Additional custom handlers to add to the logger.
+            Additional custom handlers to attach to the logger. Only
+            objects that are instances of :class:`logging.Handler` will
+            be considered.
 
         Returns
         -------
@@ -165,21 +219,22 @@ class LoggerManager:
 
         Examples
         --------
-        Basic usage with default log directory:
+        Basic usage with default log directory::
+
             >>> from security_utils.logging import LoggerManager
             >>> LoggerManager.setup("MyService", __name__)
 
-        Specify a custom log directory:
-            >>> from security_utils.logging import LoggerManager
+        Specify a custom log directory::
+
             >>> LoggerManager.setup("MyService", __name__, logger_files_path="/tmp/my_logs")
 
-        Set a custom log level:
-            >>> from security_utils.logging import LoggerManager
+        Set a custom log level::
+
             >>> import logging
             >>> LoggerManager.setup("MyService", __name__, log_level=logging.WARNING)
 
-        Use with __package__ to group logs by package:
-            >>> from security_utils.logging import LoggerManager
+        Use with ``__package__`` to group logs by package::
+
             >>> LoggerManager.setup("MyService", __package__)
         """
         cls._IDENTIFIER = identifier
@@ -217,12 +272,13 @@ class LoggerManager:
         cls,
     ) -> logging.StreamHandler:
         """
-        Create and return a console (stream) handler for logging.
+        Create a console (stream) handler configured with the manager's
+        formatter and level.
 
         Returns
         -------
         logging.StreamHandler
-            Configured stream handler for console output.
+            A stream handler ready to be attached to a :class:`logging.Logger`.
         """
         console_handler = logging.StreamHandler()
         console_handler.setLevel(cls.LOG_LEVEL())
@@ -236,10 +292,13 @@ class LoggerManager:
         """
         Create and return a timed rotating file handler for logging.
 
+        The handler writes to ``<LOG_DIRECTORY()>/logs.log`` with a daily
+        rotation schedule and keeps backups according to ``backupCount``.
+
         Returns
         -------
         logging.handlers.TimedRotatingFileHandler
-            Configured file handler with daily rotation and backup.
+            Configured file handler with daily rotation and backup files.
         """
         os.makedirs(
             cls.LOG_DIRECTORY(), exist_ok=True
