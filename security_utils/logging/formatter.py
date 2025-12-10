@@ -132,9 +132,12 @@ class ExpandedFormatter(logging.Formatter):
 
         auth_info = getattr(record, "auth_info", None)
         if user:
-            lines.append(f"User:\t{user}")
+            lines.append("User:")
+            lines.append(f"\t{user}")
             if auth_info:
-                lines.append(f"\t{auth_info}")
+                lines.append("")
+                lines.append("\tAuth Info:")
+                lines.append(f"\t\t{auth_info}")
             lines.append("")
         return lines
 
