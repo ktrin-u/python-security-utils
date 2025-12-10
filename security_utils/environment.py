@@ -20,13 +20,11 @@ Examples
 """
 
 import logging
-import inspect
-
-import warnings
-import sys
 import os
+import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
 from dotenv.main import StrPath
@@ -55,7 +53,11 @@ def check_if_venv() -> bool:
     # venv / modern virtualenv: sys.base_prefix is original interpreter roo
     return getattr(sys, "base_prefix", sys.prefix) != sys.prefix
 
-def get_project_root(caller_file: os.PathLike | None = None, root_file_indicators: Iterable[str]=[], ) -> Path:
+
+def get_project_root(
+    caller_file: os.PathLike | None = None,
+    root_file_indicators: Iterable[str] = [],
+) -> Path:
     """
     Recursively finds the project root directory by searching for known root files.
 
@@ -70,9 +72,10 @@ def get_project_root(caller_file: os.PathLike | None = None, root_file_indicator
         If the project root cannot be found.
     """
     if not check_if_venv():
-        raise OSError((
+        raise OSError(
+            (
                 "Detected that the process is not in a virtual environment. get_project_root may cause issues.",
-                "Suggestion: define PROJECT_ROOT in environment."
+                "Suggestion: define PROJECT_ROOT in environment.",
             )
         )
 
@@ -84,15 +87,13 @@ def get_project_root(caller_file: os.PathLike | None = None, root_file_indicator
         except Exception as e:
             raise e
 
-    ROOT_FILES = (
-        [
-            "pyproject.toml",
-            "setup.cfg",
-            "setup.py",
-            "uv.lock",
-            "poetry.lock",
-        ]
-    )
+    ROOT_FILES = [
+        "pyproject.toml",
+        "setup.cfg",
+        "setup.py",
+        "uv.lock",
+        "poetry.lock",
+    ]
 
     def recurse(cwd: Path, prev: Optional[Path] = None) -> Path:
         if cwd == prev:
@@ -113,6 +114,7 @@ def get_project_root(caller_file: os.PathLike | None = None, root_file_indicator
         return recurse(Path(os.path.dirname(caller_file)))
 
     return recurse(Path(__file__).parent)
+
 
 def load_env_secrets(secrets_path: StrPath = Path(".secrets")) -> None:
     """
