@@ -8,7 +8,9 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "python-dotenv",
+    "requests>=2.32.5",
 ]
+
 dynamic = ["version"]
 classifiers = [
   # How mature is this project? Common values are
@@ -24,6 +26,17 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.7",
+]
+tests = [
+    "pytest>=8.4.1",
+    "pytest-cov>=6.2.1",
+    "pytest-mock>=3.14.1",
+    "pytest-xdist>=3.8.0",
 ]
 
 [project.urls]
@@ -109,7 +122,6 @@ ignore = [
     "UP012",  # unnecessary type annotation for variable
     "B017",  # assertRaises(Exception) is too broad
     "UP007",  # unnecessary list comprehension
-    "UP038",  # use explicit type alias
     "UP045",  # unnecessary lambda expression
 ]
 
@@ -136,7 +148,7 @@ line-ending = "auto"
 # MARK: Pytest
 # Pytest configuration
 [tool.pytest.ini_options]
-addopts = "--cov-append --create-db -p no:warnings --durations=10"
+addopts = "-p no:warnings --durations=10 -vv"
 testpaths = [
     "tests"
 ]
