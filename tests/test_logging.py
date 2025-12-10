@@ -32,7 +32,11 @@ def test_console_logging_object_block(capsys):
     logger.info("Testing object block", extra={"objects": [obj1, obj2, obj3]})
 
     captured = capsys.readouterr()
-
+    # Validate that objects were rendered to the console output
+    assert "Testing object block" in captured.err
+    assert "Objects:" in captured.err
+    assert "Object 1" in captured.err
+    assert "Object 3 - tuple" in captured.err
 
     _cleanup_logger(logger_name)
 
@@ -154,7 +158,12 @@ def test_exception_logging_writes_traceback(capsys) -> None:
             pass
 
     captured = capsys.readouterr()
-
+    # Basic sanity checks that an exception trace was emitted to stderr
+    assert "Complex exception with chaining" in captured.err
+    assert (
+        "Traceback (most recent call last)" in captured.err
+        or "Exception Details:" in captured.err
+    )
 
     _cleanup_logger(logger_name)
 
@@ -199,7 +208,11 @@ def test_console_logging_request_response_blocks(capsys):
     )
 
     captured = capsys.readouterr()
-
+    # Validate that request and response blocks appear in output
+    assert "Testing request/response blocks" in captured.err
+    assert "Request:" in captured.err
+    assert "Response:" in captured.err
+    assert "https://example.com/api" in captured.err
 
     _cleanup_logger(logger_name)
 
@@ -281,7 +294,6 @@ def test_console_logging_all_blocks(capsys):
 
     captured = capsys.readouterr()
 
-
     # Basic assertions that blocks exist in output
     assert "All blocks message" in captured.err
     assert "Request:" in captured.err
@@ -316,7 +328,6 @@ def test_console_logging_message_only(capsys):
     logger.info("Just a simple message")
 
     captured = capsys.readouterr()
-
 
     # Message should be present, but other named blocks should not
     assert "Just a simple message" in captured.err
