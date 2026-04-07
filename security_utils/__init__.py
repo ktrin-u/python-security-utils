@@ -18,8 +18,6 @@ security_utils.exceptions : Custom exception classes
 
 from security_utils.logging import LoggerManager
 
-LoggerManager.setup("Security Utils", __package__ or __name__)
-
 from security_utils.environment import (
     get_project_root,
     get_required_env_var,
