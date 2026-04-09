@@ -25,7 +25,7 @@ import warnings
 from collections.abc import Iterable
 from typing import Optional
 
-from .formatter import ExpandedFormatter
+from .formatter import YamlStyleFormatter
 
 _Level = int | str
 
@@ -52,12 +52,13 @@ class LoggerManager:
         manager inspects the environment to choose a default level.
     """
 
-    _IDENTIFIER: str
     _LOGS_PATH: str | os.PathLike
     _LOG_LEVEL: _Level
+    DEFAULT_FORMATTER: logging.Formatter
+
 
     @classmethod
-    def LOG_LEVEL(cls) -> _Level:
+    def get_log_level(cls) -> _Level:
         """
         Determine the effective log level for loggers configured by the
         manager.
@@ -86,37 +87,9 @@ class LoggerManager:
 
         return cls._LOG_LEVEL
 
-    @classmethod
-    def LOG_FORMAT(cls) -> logging.Formatter:
-        """
-        Return a configured :class:`logging.Formatter` for this manager.
-
-        The formatter uses the manager's ``_IDENTIFIER`` to inject a
-        service/package identifier into each formatted record. A
-        :class:`AttributeError` is raised when ``_IDENTIFIER`` is not set
-        correctly on the class.
-
-        Returns
-        -------
-        logging.Formatter
-            Formatter instance used by handlers managed by
-            :class:`LoggerManager`.
-
-        Raises
-        ------
-        AttributeError
-            When ``_IDENTIFIER`` is not defined or is not a string.
-        """
-        if hasattr(cls, "_IDENTIFIER") and isinstance(
-            getattr(cls, "_IDENTIFIER", None), str
-        ):
-            return ExpandedFormatter(cls._IDENTIFIER)
-        raise AttributeError(
-            f"{cls.__name__} has no attribute _IDENTIFIER or it is not a string"
-        )
 
     @classmethod
-    def LOG_DIRECTORY(cls) -> str:
+    def DEFAULT_LOG_DIRECTORY(cls) -> str:
         """
         Determine the directory used to store rotating log files.
 
@@ -163,6 +136,21 @@ class LoggerManager:
             LOGS_DIR = os.path.join(processed_path, "_logs")
         return LOGS_DIR
 
+    @staticmethod
+    def reset_logger(logger: logging.Logger) -> None:
+        for h in logger.handlers[:]:
+            try:
+                h.flush()
+                h.close()
+            except Exception:
+                pass
+            logger.removeHandler(h)
+
+        # clear filters, reset level and propagation
+        logger.filters.clear()
+        logger.setLevel(logging.NOTSET)
+        logger.propagate = True
+
     @classmethod
     def setup(
         cls,
@@ -170,10 +158,12 @@ class LoggerManager:
         logger_target: str,
         log_level: Optional[_Level] = None,
         logger_files_path: Optional[str | os.PathLike] = None,
+        log_filename:str = "logs.log",
         propagate: bool = True,
         console_handler: bool = True,
         rotating_file_handler: bool = True,
         handlers: Optional[Iterable[logging.Handler]] = None,
+        reset_logger: bool = True,
     ) -> None:
         """
         Configure and attach handlers to a named logger.
@@ -237,7 +227,6 @@ class LoggerManager:
 
             >>> LoggerManager.setup("MyService", __package__)
         """
-        cls._IDENTIFIER = identifier
         if isinstance(log_level, _Level):
             cls._LOG_LEVEL = log_level
         if isinstance(logger_files_path, (str, os.PathLike)):
@@ -245,31 +234,37 @@ class LoggerManager:
 
         # Get logger
         logger = logging.getLogger(logger_target)
-        logger.setLevel(cls.LOG_LEVEL())
+
+        if reset_logger:
+            cls.reset_logger(logger)
+
+        formatter = YamlStyleFormatter(
+                static_fields={"identifier": identifier}
+            ) if getattr(cls, "DEFAULT_FORMATTER", None) is None else cls.DEFAULT_FORMATTER
+
+        logger.setLevel(cls.get_log_level())
         logger.propagate = propagate
+        out_path = os.path.join(cls.DEFAULT_LOG_DIRECTORY(), log_filename)
 
         # Add handlers
         log_handlers: list[logging.Handler] = []
         if console_handler:
-            log_handlers.append(cls.get_console_handler())
+            log_handlers.append(cls.create_console_handler(formatter))
         if rotating_file_handler:
-            log_handlers.append(cls.get_rotating_file_handler())
-        if isinstance(handlers, Iterable) and any(
-            filter(
-                lambda handler: isinstance(handler, logging.Handler), handlers
-            )
-        ):
-            log_handlers += handlers
+            log_handlers.append(cls.create_rotating_file_handler(formatter, out_path))
+        if handlers:
+            log_handlers += [handler for handler in handlers if isinstance(handler, logging.Handler)]
 
         for handler in log_handlers:
             logger.addHandler(handler)
 
         logger.critical(f"LOGGER LEVEL: {logging.getLevelName(logger.level)}")
-        logger.info(f"LOG DIRECTORY: {cls.LOG_DIRECTORY()}")
+        if rotating_file_handler:
+            logger.info(f"LOG FILE: {out_path}")
 
     @classmethod
-    def get_console_handler(
-        cls,
+    def create_console_handler(
+        cls, formatter: logging.Formatter
     ) -> logging.StreamHandler:
         """
         Create a console (stream) handler configured with the manager's
@@ -281,13 +276,13 @@ class LoggerManager:
             A stream handler ready to be attached to a :class:`logging.Logger`.
         """
         console_handler = logging.StreamHandler()
-        console_handler.setLevel(cls.LOG_LEVEL())
-        console_handler.setFormatter(cls.LOG_FORMAT())
+        console_handler.setLevel(cls.get_log_level())
+        console_handler.setFormatter(formatter)
         return console_handler
 
     @classmethod
-    def get_rotating_file_handler(
-        cls,
+    def create_rotating_file_handler(
+        cls, formatter: logging.Formatter, outpath, interval:str="D", encoding:str="UTF-8", backup_count:int=14, **kwargs
     ) -> logging.handlers.TimedRotatingFileHandler:
         """
         Create and return a timed rotating file handler for logging.
@@ -301,15 +296,16 @@ class LoggerManager:
             Configured file handler with daily rotation and backup files.
         """
         os.makedirs(
-            cls.LOG_DIRECTORY(), exist_ok=True
+            cls.DEFAULT_LOG_DIRECTORY(), exist_ok=True
         )  # Ensure LOGS_DIR exists
 
         file_handler = logging.handlers.TimedRotatingFileHandler(
-            os.path.join(cls.LOG_DIRECTORY(), "logs.log"),
-            when="D",  # interval = DAYS
-            encoding="UTF-8",
-            backupCount=14,
+            outpath,
+            when=interval,  # interval = DAYS
+            encoding=encoding,
+            backupCount=backup_count,
+            **kwargs,
         )
-        file_handler.setLevel(cls.LOG_LEVEL())
-        file_handler.setFormatter(cls.LOG_FORMAT())
+        file_handler.setLevel(cls.get_log_level())
+        file_handler.setFormatter(formatter)
         return file_handler
