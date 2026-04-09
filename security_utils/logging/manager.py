@@ -56,7 +56,6 @@ class LoggerManager:
     _LOG_LEVEL: _Level
     DEFAULT_FORMATTER: logging.Formatter
 
-
     @classmethod
     def get_log_level(cls) -> _Level:
         """
@@ -86,7 +85,6 @@ class LoggerManager:
             cls._LOG_LEVEL = logging.INFO
 
         return cls._LOG_LEVEL
-
 
     @classmethod
     def DEFAULT_LOG_DIRECTORY(cls) -> str:
@@ -158,7 +156,7 @@ class LoggerManager:
         logger_target: str,
         log_level: Optional[_Level] = None,
         logger_files_path: Optional[str | os.PathLike] = None,
-        log_filename:str = "logs.log",
+        log_filename: str = "logs.log",
         propagate: bool = True,
         console_handler: bool = True,
         rotating_file_handler: bool = True,
@@ -238,9 +236,11 @@ class LoggerManager:
         if reset_logger:
             cls.reset_logger(logger)
 
-        formatter = YamlStyleFormatter(
-                static_fields={"identifier": identifier}
-            ) if getattr(cls, "DEFAULT_FORMATTER", None) is None else cls.DEFAULT_FORMATTER
+        formatter = (
+            YamlStyleFormatter(static_fields={"identifier": identifier})
+            if getattr(cls, "DEFAULT_FORMATTER", None) is None
+            else cls.DEFAULT_FORMATTER
+        )
 
         logger.setLevel(cls.get_log_level())
         logger.propagate = propagate
@@ -251,9 +251,15 @@ class LoggerManager:
         if console_handler:
             log_handlers.append(cls.create_console_handler(formatter))
         if rotating_file_handler:
-            log_handlers.append(cls.create_rotating_file_handler(formatter, out_path))
+            log_handlers.append(
+                cls.create_rotating_file_handler(formatter, out_path)
+            )
         if handlers:
-            log_handlers += [handler for handler in handlers if isinstance(handler, logging.Handler)]
+            log_handlers += [
+                handler
+                for handler in handlers
+                if isinstance(handler, logging.Handler)
+            ]
 
         for handler in log_handlers:
             logger.addHandler(handler)
@@ -282,7 +288,13 @@ class LoggerManager:
 
     @classmethod
     def create_rotating_file_handler(
-        cls, formatter: logging.Formatter, outpath, interval:str="D", encoding:str="UTF-8", backup_count:int=14, **kwargs
+        cls,
+        formatter: logging.Formatter,
+        outpath,
+        interval: str = "D",
+        encoding: str = "UTF-8",
+        backup_count: int = 14,
+        **kwargs,
     ) -> logging.handlers.TimedRotatingFileHandler:
         """
         Create and return a timed rotating file handler for logging.
