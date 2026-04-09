@@ -116,7 +116,8 @@ class YamlStyleFormatter(BaseJsonFormatter):
             )
         return levelname
 
-    def format_exception(self, record: LogRecord) -> dict[str, Any]:
+    @staticmethod
+    def format_exception(record: LogRecord) -> dict[str, Any]:
         """Format exception information when ``exc_info`` is present.
 
         Parameters
@@ -161,33 +162,6 @@ class YamlStyleFormatter(BaseJsonFormatter):
             exc_info["formatted"] = formatted
 
         return exc_info
-
-    def format_objects(self, record: LogRecord) -> dict[str, str]:
-        """Format arbitrary objects attached to the record via ``objects``.
-
-        If ``record.objects`` is a list, each object will be inspected for
-        ``__dict__`` or ``__slots__`` and a readable representation emitted.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record that may contain an ``objects`` attribute.
-
-        Returns
-        -------
-        list[str]
-            Lines describing the provided objects; empty list when none.
-        """
-        objects: list[object] = getattr(record, "objects", [])
-        objects_dict = {}
-
-        for idx, obj in enumerate(objects, 1):
-            objects_dict[f"Object {idx} - {obj.__class__.__qualname__}"] = (
-                getattr(obj, "__dict__", None)
-                or getattr(obj, "__slots__", None)
-                or repr(obj)
-            )
-        return objects_dict
 
     def format_request_object(self, obj: object) -> dict[str, str]:
         inner: dict[str, Any] = {}
