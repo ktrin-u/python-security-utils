@@ -1,10 +1,16 @@
-import logging
-from collections.abc import Mapping
+import re
+import traceback as tb
+from collections.abc import Mapping, Sequence
 from logging import LogRecord
-from typing import Any, Literal
+from types import TracebackType
+from typing import Any, Literal, cast
+
+import termcolor
+from msgspec import json
+from pythonjsonlogger.core import BaseJsonFormatter
 
 
-class ExpandedFormatter(logging.Formatter):
+class YamlStyleFormatter(BaseJsonFormatter):
     """Formatter that builds structured, multi-line log messages.
 
     The formatter constructs a sequence of human-readable blocks (header,
@@ -54,118 +60,63 @@ class ExpandedFormatter(logging.Formatter):
 
     def __init__(
         self,
-        identifier: str,
         fmt: str | None = None,
         datefmt: str | None = None,
         style: Literal["%"] | Literal["{"] | Literal["$"] = "%",
         validate: bool = True,
         *,
-        defaults: Mapping[str, Any] | None = None,
+        prefix: str = "",
+        rename_fields: dict[str, str] | None = None,
+        rename_fields_keep_missing: bool = False,
+        static_fields: dict[str, Any] | None = None,
+        reserved_attrs: Sequence[str] | None = None,
+        timestamp: bool | str = False,
+        defaults: dict[str, Any] | None = None,
+        exc_info_as_array: bool = False,
+        stack_info_as_array: bool = False,
+        indent: int = 4,
+        levels_color_mapping: dict[str, str | tuple[int, int, int]]
+        | None = None,
+        colorize: bool = False,
     ) -> None:
-        super().__init__(fmt, datefmt, style, validate, defaults=defaults)
+        super().__init__(
+            fmt,
+            datefmt,
+            style,
+            validate,
+            defaults=defaults,
+            prefix=prefix,
+            rename_fields=rename_fields,
+            rename_fields_keep_missing=rename_fields_keep_missing,
+            static_fields=static_fields,
+            reserved_attrs=reserved_attrs,
+            timestamp=timestamp,
+            exc_info_as_array=exc_info_as_array,
+            stack_info_as_array=stack_info_as_array,
+        )
 
-        self.identifier = str(identifier)
+        self.indent = indent
+        self.colorize = colorize
 
-    def header_block(self, record: LogRecord) -> list[str]:
-        """Build the header block for a log record.
+        if levels_color_mapping is None:
+            self.levels_color_mapping = {
+                "ERROR": "light_red",
+                "INFO": "green",
+                "WARNING": "orange",
+                "DEBUG": "light_grey",
+                "CRITICAL": "red",
+            }
+        else:
+            self.levels_color_mapping = levels_color_mapping
 
-        The header contains a timestamp, log level, identifier and logger name.
-        If the ``record`` has a ``status`` attribute it will also be included.
+    def format_levelname(self, levelname: str) -> str:
+        if self.colorize:
+            return termcolor.colored(
+                levelname, self.levels_color_mapping[levelname.upper()]
+            )
+        return levelname
 
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record to format.
-
-        Returns
-        -------
-        list[str]
-            Lines that make up the header block (single-element list).
-        """
-        ts = self.formatTime(record, self.datefmt)
-        header = f"[{ts}][{record.levelname}][{self.identifier}][{record.name}]"
-        status = getattr(record, "status", None)
-        if status:
-            header += f"[{status}]"
-
-        return [header]
-
-    def message_block(self, record: LogRecord) -> list[str]:
-        """Format the message block for a log record.
-
-        This includes the core log message returned by ``record.getMessage()``.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record to format.
-
-        Returns
-        -------
-        list[str]
-            Lines for the message block. Empty list when no message present.
-        """
-        # safe dynamic fields
-        message = record.getMessage()
-        lines: list[str] = []
-        if message:
-            lines.append("Message:")
-            lines.append(f"\t{message}")
-            lines.append("")
-        return lines
-
-    def user_block(self, record: LogRecord) -> list[str]:
-        """Format user/authentication information if present on the record.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record that may contain ``user`` and ``auth_info`` attributes.
-
-        Returns
-        -------
-        list[str]
-            Lines for the user block; empty list when no user information.
-        """
-        user = getattr(record, "user", None)
-        lines: list[str] = []
-
-        auth_info = getattr(record, "auth_info", None)
-        if user:
-            lines.append("User:")
-            lines.append(f"\t{user}")
-            if auth_info:
-                lines.append("")
-                lines.append("\tAuth Info:")
-                lines.append(f"\t\t{auth_info}")
-            lines.append("")
-        return lines
-
-    def details_block(self, record: LogRecord) -> list[str]:
-        """Include an arbitrary ``details`` attribute from the record.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record that may have a ``details`` attribute.
-
-        Returns
-        -------
-        list[str]
-            Lines describing the details; empty list if ``details`` is None.
-        """
-        details = getattr(record, "details", None)
-        lines: list[str] = []
-        if details is not None:
-            lines.append("Details:")
-            try:
-                lines.append(f"\t{details}")
-            except Exception:
-                lines.append("\t<unrepresentable>")
-            lines.append("")
-        return lines
-
-    def exception_block(self, record: LogRecord) -> list[str]:
+    def format_exception(self, record: LogRecord) -> dict[str, Any]:
         """Format exception information when ``exc_info`` is present.
 
         Parameters
@@ -178,112 +129,40 @@ class ExpandedFormatter(logging.Formatter):
         list[str]
             Lines that show the function name and formatted exception text.
         """
-        lines: list[str] = []
-        if record.exc_info:
-            lines.append("Function Name:")
-            lines.append(f"\t{record.funcName}")
-            lines.append("")
+        if record.exc_info is None:
+            return {}
 
-            exc_text = self.formatException(record.exc_info)
-            lines.append("Exception Details:")
-            for line in exc_text.strip().splitlines():
-                lines.append(f"\t{line}")
-        return lines
+        exc_info: dict[str, Any] = {}
+        exc_info["function name"] = record.funcName
 
-    def _process_http_object(self, http_object: Any) -> list[str]:
-        """Inspect a request/response-like object and produce detail lines.
+        if any(item for item in record.exc_info if item is not None):
+            exc_type, exception, tb_obj = cast(
+                tuple[type[BaseException], Exception, TracebackType],
+                record.exc_info,
+            )
+            frames: list[dict[str, Any]] = []
+            tb_iter = tb_obj
+            while tb_iter is not None:
+                frame = tb_iter.tb_frame
+                frames.append(
+                    {
+                        "file": frame.f_code.co_filename,
+                        "line_no": tb_iter.tb_lineno,
+                        "function": frame.f_code.co_name,
+                    }
+                )
+                tb_iter = tb_iter.tb_next
 
-        The function checks for common attributes used by HTTP client/response
-        objects (``status_code``, ``method``, ``url``, ``headers``,
-        ``body``, ``text``) and emits human-readable lines describing them.
-
-        Parameters
-        ----------
-        http_object : Any
-            An object representing an HTTP request or response.
-
-        Returns
-        -------
-        list[str]
-            Lines describing the http object; empty list when no meaningful
-            attributes are present.
-        """
-        lines: list[str] = []
-        if hasattr(http_object, "status_code"):
-            lines.append(
-                f"\tStatus: {getattr(http_object, 'status_code', None)}"
+            formatted = "".join(
+                tb.format_exception(exc_type, exception, tb_obj)
             )
 
-        if hasattr(http_object, "status_code"):
-            lines.append(f"\tMethod: {getattr(http_object, 'method', None)}")
+            exc_info["traceback"] = frames
+            exc_info["formatted"] = formatted
 
-        lines.append(f"\tURL: {getattr(http_object, 'url', None)}")
+        return exc_info
 
-        if hasattr(http_object, "headers"):
-            lines.append(
-                f"\tHeaders: {dict(getattr(http_object, 'headers', {}))}"
-            )
-
-        if hasattr(http_object, "body") and getattr(http_object, "body", None):
-            lines.append(f"\tBody: {getattr(http_object, 'body', None)}")
-
-        if hasattr(http_object, "text"):
-            body = getattr(http_object, "text", None)
-            if body:
-                lines.append(f"\tBody: {body}")
-        return lines
-
-    def request_block(self, record: LogRecord) -> list[str]:
-        """Format a ``request`` attribute from the record, if present.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record that may contain a ``request`` attribute.
-
-        Returns
-        -------
-        list[str]
-            Lines describing the request; empty list when not present.
-        """
-        request = getattr(record, "request", None)
-        lines: list[str] = []
-        if request is not None:
-            lines.append("Request:")
-            parsed = self._process_http_object(request)
-            if parsed:
-                lines += parsed
-            else:
-                lines.append(f"\t{request}")
-            lines.append("")
-        return lines
-
-    def response_block(self, record: LogRecord) -> list[str]:
-        """Format a ``response`` attribute from the record, if present.
-
-        Parameters
-        ----------
-        record : logging.LogRecord
-            The record that may contain a ``response`` attribute.
-
-        Returns
-        -------
-        list[str]
-            Lines describing the response; empty list when not present.
-        """
-        response = getattr(record, "response", None)
-        lines: list[str] = []
-        if response is not None:
-            lines.append("Response:")
-            parsed = self._process_http_object(response)
-            if parsed:
-                lines += parsed
-            else:
-                lines.append(f"\t{response}")
-            lines.append("")
-        return lines
-
-    def object_block(self, record: LogRecord) -> list[str]:
+    def format_objects(self, record: LogRecord) -> dict[str, str]:
         """Format arbitrary objects attached to the record via ``objects``.
 
         If ``record.objects`` is a list, each object will be inspected for
@@ -299,24 +178,137 @@ class ExpandedFormatter(logging.Formatter):
         list[str]
             Lines describing the provided objects; empty list when none.
         """
-        objects: list[object] | None = getattr(record, "objects", None)
-        lines: list[str] = []
-        if objects and isinstance(objects, list):
-            lines.append("Objects:")
-            for idx, obj in enumerate(objects, 1):
-                lines.append(f"\tObject {idx} - {obj.__class__.__qualname__}:")
-                # Try to get a useful representation
-                if hasattr(obj, "__dict__"):
-                    for k, v in vars(obj).items():
-                        lines.append(f"\t\t{k}: {v}")
-                elif hasattr(obj, "__slots__"):
-                    for k in obj.__slots__:  # pyright: ignore[reportAttributeAccessIssue]
-                        v = getattr(obj, k, None)
-                        lines.append(f"\t\t{k}: {v}")
+        objects: list[object] = getattr(record, "objects", [])
+        objects_dict = {}
+
+        for idx, obj in enumerate(objects, 1):
+            objects_dict[f"Object {idx} - {obj.__class__.__qualname__}"] = (
+                getattr(obj, "__dict__", None)
+                or getattr(obj, "__slots__", None)
+                or repr(obj)
+            )
+        return objects_dict
+
+    def format_request_object(self, obj: object) -> dict[str, str]:
+        inner: dict[str, Any] = {}
+        for field_name in (
+            "method",
+            "headers",
+            "url",
+            "body",
+            "content",
+            "text",
+            "status_code",
+            "status",
+            "body",
+            "query",
+            "query_params",
+            "content",
+        ):
+            val = getattr(obj, field_name, None)
+            if val is None:
+                continue
+            # Avoid calling callables or awaiting coroutines in formatter
+            if callable(val):
+                try:
+                    # Some clients expose .text as a property returning str
+                    maybe = val()
+                except Exception:
+                    continue
                 else:
-                    lines.append(f"\t\t{repr(obj)}")
-            lines.append("")
-        return lines
+                    if isinstance(maybe, (str, bytes)):
+                        inner[field_name] = maybe
+                    else:
+                        inner[field_name] = str(maybe)
+            else:
+                inner[field_name] = val
+        return inner
+
+    def format_default(self, obj: object, depth: int):
+        try:
+            if obj.__dict__:
+                return self._serialize(obj.__dict__, depth + 1)
+            raise Exception
+        except Exception:
+            scalar = "null" if obj is None else str(obj)
+            # Quote scalar if it contains problematic characters
+            if isinstance(obj, str) and re.search(r"[:#\n\r\t]|^\s|\s$", obj):
+                return json.encode(obj).decode()
+            return scalar
+
+    def _serialize(self, value: Any, depth: int) -> list[str]:
+        indent = " " * (self.indent * depth)
+        lines: list[str] = []
+
+        if isinstance(value, Mapping):
+            for k, v in value.items():
+                kq = str(k)
+                # Nested mapping or sequence
+                if isinstance(v, (Mapping, list)):
+                    if not v:
+                        continue
+                    lines.append(f"{indent}{kq}:")
+                    lines.extend(self._serialize(v, depth + 1))
+                elif isinstance(v, str) and "\n" in v:
+                    # Use literal block for multi-line strings
+                    lines.append(f"{indent}{kq}:")
+                    for ln in v.rstrip("\n").splitlines():
+                        lines.append(f"{' ' * (self.indent * (depth + 1))}{ln}")
+                elif any(
+                    True
+                    for field in ["method", "url", "headers"]
+                    if hasattr(v, field)
+                ):
+                    inner = self.format_request_object(v)
+
+                    if inner:
+                        lines.append(f"{indent}{kq}:")
+                        lines.extend(self._serialize(inner, depth + 1))
+                else:
+                    scalar = self.format_default(v, depth)
+                    if isinstance(scalar, str):
+                        lines.append(f"{indent}{kq}: {scalar}")
+                    else:
+                        lines.append(f"{indent}{kq}:")
+                        lines.extend(scalar)
+            return lines
+
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, (Mapping, list)):
+                    lines.append(f"{indent}- {repr(item)}")
+                    lines.extend(self._serialize(item, depth + 1))
+                elif isinstance(item, str) and "\n" in item:
+                    lines.append(f"{indent}- |")
+                    for ln in item.rstrip("\n").splitlines():
+                        lines.append(f"{' ' * (self.indent * (depth + 1))}{ln}")
+                else:
+                    scalar = self.format_default(item, depth)
+                    if isinstance(scalar, str):
+                        lines.append(f"{indent}- {scalar}")
+                    else:
+                        lines.append(f"{indent}- {repr(item)}")
+                        lines.extend(scalar)
+                    # lines.append(f"{indent}- {scalar}")
+            return lines
+
+        # Fallback scalar
+        val = "null" if value is None else str(value)
+        return [f"{indent}{val}"]
+
+    def serialize_as_yaml(self, obj: dict, starting_indent: int = 0) -> str:
+        """Serialize a mapping to a compact, readable YAML string.
+
+        Ensures multi-line values (like tracebacks) are preserved as
+        literal blocks and that keys retain insertion order. Returns a
+        trimmed string (no trailing newlines) suitable for inclusion in
+        single-line log records or multi-line blocks.
+        """
+
+        try:
+            return "\n".join(self._serialize(obj, starting_indent))
+        except Exception:
+            return "exception: <unserializable>"
 
     def format(self, record: LogRecord) -> str:
         """Assemble all blocks into the final formatted string.
@@ -331,13 +323,24 @@ class ExpandedFormatter(logging.Formatter):
         str
             The multi-line formatted log message.
         """
-        lines: list[str] = []
-        lines += self.header_block(record)
-        lines += self.message_block(record)
-        lines += self.request_block(record)
-        lines += self.response_block(record)
-        lines += self.user_block(record)
-        lines += self.details_block(record)
-        lines += self.object_block(record)
-        lines += self.exception_block(record)
-        return "\n".join(lines)
+
+        message_dict: dict[str, Any] = {}
+        if isinstance(record.msg, dict):
+            message_dict = record.msg
+            record.message = ""
+        else:
+            record.message = record.getMessage()
+
+            message_dict["exception_info"] = self.format_exception(record)
+        if record.stack_info and not message_dict.get("stack_info"):
+            message_dict["stack_info"] = self.formatStack(record.stack_info)
+
+        log_data: dict[str, Any] = {}
+        self.add_fields(log_data, record, message_dict)
+        log_data = self.process_log_record(log_data)
+        message: str = log_data.pop("message")
+
+        if self.colorize:
+            message = f"{termcolor.colored(record.message, 'blue')}"
+
+        return f"[{self.formatTime(record, self.datefmt)}] {self.format_levelname(record.levelname)} {message}\n{self.serialize_as_yaml(log_data, 1)}"
